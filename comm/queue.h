@@ -10,7 +10,12 @@
 
 #include "para.h"
 typedef unsigned char uchar;
+
+#ifndef TYPEDEF_BOOL
+#define TYPEDEF_BOOL
 typedef unsigned char BOOL;
+#endif
+
 #define TRUE  (1)
 #define FALSE (0)
 #define QUEUE_SIZE (20)

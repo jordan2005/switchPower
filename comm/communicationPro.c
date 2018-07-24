@@ -7,45 +7,31 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <pthread.h>
+#include<semaphore.h>
 #include "linuxType.h"
 #include "para.h"
 #include "communicationPro.h"
 #include <string.h>
 #include "queue.h"
 #include <stdlib.h>
+#include "modbusTcpSrv.h"
 #define POOL_COUNT 256
+sem_t semtSetCmd;
+pthread_mutex_t mutexSetPara;
 
-static TPowerRunPara tPowerRunPara =
-		{
-			.tGyRunBasePara = {0},
-			.tGyRunSuperPara = {0},
-			.tDyRunPara = {0}
-		};
-
-static TPowerSetPara tPowerSetPara =
-		{
-			.tGySetPara   = GY_SET_PARA,
-			.tDySetPara   = {0},
-			.tTimeSetPara = {0},
-			.tGySetOper   = {0},
-			.tDySetOper   = {0}
-		};
-
-//void* sendSetCmd(void* fdSend)
-//{
-//	while(1)
-//	{
-//		if (write(*((fid*)fdSend+1), "hello parent\n", 13) < 0)
-//			printf("write pipe error.\n");
-//		sleep(13);
-//	}
-//
-//	return NULL;
-//}
-
-void checkParaChange()
+void checkParaChange(TQueue* ptQ)
 {
-	;
+	uint16* pBak = (uint16*)getSetParaBak();
+	uint16* pHold = getRegHolding();
+	int i = 0;
+	for (i=0; i<sizeof(TPowerSetPara)/2; i++)
+	{
+		if ((pBak[i]!=pHold[i]) && !Queue_bIsFull(ptQ))
+		{
+			Queue_bInsert(ptQ, i);
+		}
+	}
+
 }
 
 void writeSetCmd(TQueue* ptQ, fid* fdSend)
@@ -60,49 +46,36 @@ void writeSetCmd(TQueue* ptQ, fid* fdSend)
 
 	for (i=0; i<usCnt; i++)
 	{
+		TPowerSetPara* ptPara = (TPowerSetPara*)getRegHolding();
 		(void)Queue_bFetch(ptQ, &pt[i].usPos);
-		pt[i].u16Value = ((uint16*)&tPowerSetPara)[pt[i].usPos];
+		pt[i].u16Value = ((uint16*)ptPara)[pt[i].usPos];
+		printf("\n pos: %d, value: %d\n", pt[i].usPos, pt[i].u16Value);
 	}
 
 	if (write(*((fid*)fdSend+1), pt, usCnt*sizeof(TChangeParaMsg)) < 0)
 		printf("write pipe error.\n");
+
 	free(pt);
 }
 
 void* sendSetCmd(void* fdSend)
 {
 	TQueue tQueue;
-	//modbusComm()  To do.
 
 	unsigned char ucQueSize = sizeof(TPowerSetPara)/2;
+	Queue_bInit(&tQueue, ucQueSize);
+
 	while (1)
 	{
-		Queue_bInit(&tQueue, ucQueSize);
-		Queue_bInsert(&tQueue, 4);
-		Queue_bInsert(&tQueue, 1);
-		Queue_bInsert(&tQueue, 0);
-		Queue_bInsert(&tQueue, 2);
-
+		sem_wait(&semtSetCmd);
+    	pthread_mutex_lock(&mutexSetPara);
 		checkParaChange(&tQueue);
+		pthread_mutex_unlock(&mutexSetPara);
 		if(!Queue_bIsEmpty(&tQueue))
 			writeSetCmd(&tQueue, fdSend);
-
-		sleep(2);
 	}
-
 	return NULL;
 }
-
-
-
-void paraPrintf(uint16 *pPara, int length)
-{
-	int i;
-	for (i=0; i<length; i++)
-		printf("%d  ",pPara[i]);
-	printf("\n");
-}
-
 
 
 void* readRunPara(void* fdRecv)
@@ -113,20 +86,16 @@ void* readRunPara(void* fdRecv)
 		char para[POOL_COUNT];
 		n = read(*(fid*)fdRecv, para, POOL_COUNT);
 
-		if (n == sizeof(tPowerRunPara))
+		if (n == sizeof(TPowerRunPara))
 		{
-			memcpy(&tPowerRunPara, para, n);
-			printf("receive run para.\n");
+			memcpy((char*)getRegInput(), para, n);
 		}
-		else if (n == sizeof(tPowerSetPara))
+		else if (n == sizeof(TPowerSetPara))
 		{
-			memcpy(&tPowerSetPara, para, n);
-			printf("receive set para.\n");
+			memcpy((char*)getRegHolding(), para, n);
 		}
 		else
 			printf("comm module receive data  error.\n");
-
-		paraPrintf((uint16*)para, n/2);
 	}
 
 	return NULL;
@@ -140,13 +109,16 @@ int runCommPro(fid* pfdRecv,fid* pfdSend)
 	close(pfdRecv[1]);
 
 	pthread_create(&tid, NULL, sendSetCmd, pfdSend);
-	//pthread_create(&tid, NULL, readRunPara, pfdRecv);
+	pthread_create(&tid, NULL, readRunPara, pfdRecv);
+	pthread_create(&tid, NULL, modbusServer, NULL);
+	pthread_join(tid, NULL);
+//	while(1)
+//	{
+//		sleep(1);
+//	}
 
-	while(1)
-	{
-		sleep(1);
-	}
-
+	sem_destroy(&semtSetCmd);
+	pthread_mutex_destroy(&mutexSetPara);
 	return 0;
 }
 

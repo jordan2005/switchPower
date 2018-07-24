@@ -1,6 +1,5 @@
 
-#CROSS_COMPILE = arm-linux-
-CROSS_COMPILE =
+CROSS_COMPILE = arm-linux-
 AS		= $(CROSS_COMPILE)as   #汇编
 LD		= $(CROSS_COMPILE)ld   #链接
 CC		= $(CROSS_COMPILE)gcc  #编译
@@ -16,9 +15,17 @@ export AS LD CC CPP AR NM
 export STRIP OBJCOPY OBJDUMP
 
 CFLAGS := -Wall -O2 -g
+CFLAGS += -I $(shell pwd)
 CFLAGS += -I $(shell pwd)/comm
 CFLAGS += -I $(shell pwd)/control
 CFLAGS += -I $(shell pwd)/include
+CFLAGS += -I $(shell pwd)/modbus
+CFLAGS += -I $(shell pwd)/modbus/ascii
+CFLAGS += -I $(shell pwd)/modbus/functions
+CFLAGS += -I $(shell pwd)/modbus/include
+CFLAGS += -I $(shell pwd)/modbus/rtu
+CFLAGS += -I $(shell pwd)/modbus/tcp
+CFLAGS += -I $(shell pwd)/port
 
 
 #LDFLAGS := -lm -lts -lpthread
@@ -35,6 +42,8 @@ TARGET := power
 obj-y += main.o
 obj-y += control/
 obj-y += comm/
+obj-y += modbus/
+obj-y += port/
 
 all : 
 	make -C ./ -f $(TOPDIR)/Makefile.build  #执行当前目录下Makefile.build
