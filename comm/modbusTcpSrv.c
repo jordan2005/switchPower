@@ -19,31 +19,13 @@
 #include "type.h"
 #include "modbusTcpSrv.h"
 #include "para.h"
+#include "queue.h"
 
 static TProtocolBuf tProtocolBuf = { .bFrameSent = FALSE };
 TProtocolBuf* getProtocolBuf() { return &tProtocolBuf; }
 static TPowerSetPara tPowerSetPara;
 TPowerSetPara* getSetParaBak() { return &tPowerSetPara; }
 
-
-/*********************************************************************************/
-/* Private define ------------------------------------------------------------*/
-//输入寄存器起始地址
-#define REG_INPUT_START       0x0001
-//输入寄存器数量
-#define REG_INPUT_NREGS       70
-//保持寄存器起始地址
-#define REG_HOLDING_START     0x0001
-//保持寄存器数量
-#define REG_HOLDING_NREGS     120
-//线圈起始地址
-#define REG_COILS_START       0x0001
-//线圈数量
-#define REG_COILS_SIZE        16
-//开关寄存器起始地址
-#define REG_DISCRETE_START    0x0001
-//开关寄存器数量
-#define REG_DISCRETE_SIZE     16
 
 static volatile struct _TModbusRegs
 {
@@ -337,6 +319,26 @@ static void handleMBMsg(int* pfd)
 }
 
 
+extern TQueue tQueue;
+static int checkParaChange(TQueue* ptQ)
+{
+	int ret = 0;
+	uint16* pBak = (uint16*)getSetParaBak();
+	uint16* pHold = getRegHolding();
+	int i = 0;
+	for (i=0; i<sizeof(TPowerSetPara)/2; i++)
+	{
+		if ((pBak[i]!=pHold[i]) && !Queue_bIsFull(ptQ))
+		{
+			Queue_bInsert(ptQ, i);
+			ret = 1;
+		}
+	}
+
+	return ret;
+}
+
+
 
 extern sem_t semtSetCmd;
 extern pthread_mutex_t mutexSetPara;
@@ -408,8 +410,9 @@ void* modbusServer(void* arg)
             	pthread_mutex_lock(&mutexSetPara);
             	memcpy((char*)getSetParaBak(), (char*)(tModbusRegs.usRegHoldingBuf), sizeof(TPowerSetPara));//备份当前保持寄存器
             	handleMBMsg(&selectFd[index]);
+            	if (checkParaChange(&tQueue) > 0)
+            		sem_post(&semtSetCmd);
             	pthread_mutex_unlock(&mutexSetPara);
-            	sem_post(&semtSetCmd);
             }
         }
 

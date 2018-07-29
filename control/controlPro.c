@@ -10,9 +10,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <string.h>
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <string.h>
+
 #include "linuxType.h"
 #include "para.h"
 #include "controlPro.h"
+
+//#define SERVER_PORT 4321
+
 
 static volatile TPowerRunPara tPowerRunPara =
 		{
@@ -30,7 +43,55 @@ static volatile TPowerSetPara tPowerSetPara =
 			.tDySetOper   = {4}
 		};
 
-#define MAXLINE 1024
+
+
+int writeRunPara()
+{
+	int fd = -1;        // fd 就是file descriptor，文件描述符
+	int ret = -1;
+	int cnt = sizeof(TPowerRunPara)/2;
+	int offset = 0;
+	char writeBuf[sizeof(TPowerRunPara)/2 * 6] = {{'0'}};
+	uint16* pRunPara = (uint16*)&tPowerRunPara;
+	int i = 0;
+
+	fd = open("/var/www/rundata.txt", O_WRONLY|O_CREAT);
+	if (fd < 0)
+	{
+		printf("rundata.txt 文件打开错误\n");
+		return -1;
+	}
+
+	for (i=0; i<cnt; ++i)
+		offset += sprintf((char*)writeBuf+offset,"%d,",pRunPara[i]);
+		//sprintf(writeBuf[i], "5d%,", pRunPara[i]);
+	(char*)writeBuf[offset-1]='\n';
+
+	ret = write(fd, (char*)writeBuf, sizeof(writeBuf));
+	if (ret < 0)
+	{
+		printf("write失败.\n");
+		return -1;
+	}
+	    /*
+	        // 读文件
+	        ret = read(fd, buf, 5);
+	        if (ret < 0)
+	        {
+	            printf("read失败\n");
+	        }
+	        else
+	        {
+	            printf("实际读取了%d字节.\n", ret);
+	            printf("文件内容是：[%s].\n", buf);
+	        }
+	    */
+	        // 第三步：关闭文件
+	close(fd);
+	return 0;
+}
+
+
 
 void simRunPara()
 {
@@ -45,6 +106,8 @@ void simRunPara()
 	}
 }
 
+
+
 void* sendRunPara(void* fdSend)
 {
 	while(1)
@@ -52,25 +115,26 @@ void* sendRunPara(void* fdSend)
 		simRunPara();
 		if (write(*((fid*)fdSend+1), (unsigned char*)&tPowerRunPara, sizeof(tPowerRunPara)) < 0)
 			printf("write pipe error.\n");
-		sleep(1);
+		usleep(5000);
 
 		if (write(*((fid*)fdSend+1), (unsigned char*)&tPowerSetPara, sizeof(tPowerSetPara)) < 0)
 			printf("write pipe error.\n");
-		sleep(1);
+		usleep(5000);
+		writeRunPara();
 	}
 
 	return NULL;
 }
 
 
-
+#define BUFF_LEN 1024
 void* readSetCmd(void* fdRecv)
 {
 	while(1)
 	{
 		int n;
-		char para[MAXLINE];
-		n = read(*(fid*)fdRecv, para, MAXLINE);
+		char para[BUFF_LEN];
+		n = read(*(fid*)fdRecv, para, BUFF_LEN);
 		printf("\n receieve para set change:\n");
 		//display received para;
 		{
@@ -88,6 +152,8 @@ void* readSetCmd(void* fdRecv)
 	return NULL;
 }
 
+
+
 int runCtrlPro(fid* pfdRecv,fid* pfdSend)
 {
 	pthread_t tid;
@@ -98,6 +164,7 @@ int runCtrlPro(fid* pfdRecv,fid* pfdSend)
 	pthread_create(&tid, NULL, sendRunPara, pfdSend);
 	pthread_create(&tid, NULL, readSetCmd, pfdRecv);
 
+	pthread_join(tid, NULL);
 	while(1)
 	{
 		sleep(1);

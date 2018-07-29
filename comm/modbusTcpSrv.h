@@ -11,6 +11,24 @@
 #include "port.h"
 #include "para.h"
 
+//输入寄存器起始地址
+#define REG_INPUT_START       0x0001
+//输入寄存器数量
+#define REG_INPUT_NREGS       70
+//保持寄存器起始地址
+#define REG_HOLDING_START     0x0001
+//保持寄存器数量
+#define REG_HOLDING_NREGS     120
+//线圈起始地址
+#define REG_COILS_START       0x0001
+//线圈数量
+#define REG_COILS_SIZE        16
+//开关寄存器起始地址
+#define REG_DISCRETE_START    0x0001
+//开关寄存器数量
+#define REG_DISCRETE_SIZE     16
+
+
 #define MB_TCP_BUF_SIZE  2048
 typedef struct _TProtocolBuf
 {
