@@ -23,20 +23,20 @@ int main(void)
 	pid_t pid;
 
 	if ((pipe(fdCtrlToCom) < 0) || (pipe(fdComToCtrl) < 0))
-			printf("pipe error\n");
+			DEBUG_PRINT("pipe error\n");
 	if ((pid = fork()) < 0)
 	{
-		printf("fork error\n");
+		DEBUG_PRINT("fork error\n");
 	}
 	else if (pid > 0)
 	{
 		if(runCtrlPro(fdCtrlToCom,fdComToCtrl))
-			printf("control process error!");
+			DEBUG_PRINT("control process error!");
 	}
 	else
 	{
 		if (runCommPro(fdComToCtrl,fdCtrlToCom))
-			printf("communication process error!");
+			DEBUG_PRINT("communication process error!");
 	}
 
 	return (0);

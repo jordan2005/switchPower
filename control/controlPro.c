@@ -58,7 +58,7 @@ int writeRunPara()
 	fd = open("/var/www/rundata.txt", O_WRONLY|O_CREAT);
 	if (fd < 0)
 	{
-		printf("rundata.txt 文件打开错误\n");
+		DEBUG_PRINT("rundata.txt 文件打开错误\n");
 		return -1;
 	}
 
@@ -70,7 +70,7 @@ int writeRunPara()
 	ret = write(fd, (char*)writeBuf, sizeof(writeBuf));
 	if (ret < 0)
 	{
-		printf("write失败.\n");
+		DEBUG_PRINT("write失败.\n");
 		return -1;
 	}
 	    /*
@@ -114,11 +114,11 @@ void* sendRunPara(void* fdSend)
 	{
 		simRunPara();
 		if (write(*((fid*)fdSend+1), (unsigned char*)&tPowerRunPara, sizeof(tPowerRunPara)) < 0)
-			printf("write pipe error.\n");
+			DEBUG_PRINT("write pipe error.\n");
 		usleep(5000);
 
 		if (write(*((fid*)fdSend+1), (unsigned char*)&tPowerSetPara, sizeof(tPowerSetPara)) < 0)
-			printf("write pipe error.\n");
+			DEBUG_PRINT("write pipe error.\n");
 		usleep(5000);
 		writeRunPara();
 	}
@@ -135,7 +135,7 @@ void* readSetCmd(void* fdRecv)
 		int n;
 		char para[BUFF_LEN];
 		n = read(*(fid*)fdRecv, para, BUFF_LEN);
-		printf("\n receieve para set change:\n");
+		DEBUG_PRINT("\n receieve para set change:\n");
 		//display received para;
 		{
 			int i;
@@ -143,7 +143,7 @@ void* readSetCmd(void* fdRecv)
 			uint16* ptSetPara =  (uint16*)&tPowerSetPara;
 			for (i=0; i<n/sizeof(TChangeParaMsg); i++)
 			{
-				printf("changePos:%d changeValue:%d .\n", ptRecv[i].usPos, ptRecv[i].u16Value);
+				DEBUG_PRINT("changePos:%d changeValue:%d .\n", ptRecv[i].usPos, ptRecv[i].u16Value);
 				ptSetPara[ptRecv[i].usPos] = ptRecv[i].u16Value;
 			}
 		}

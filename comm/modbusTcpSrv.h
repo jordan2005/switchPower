@@ -10,6 +10,7 @@
 #include "type.h"
 #include "port.h"
 #include "para.h"
+#include "debugPrint.h"
 
 //输入寄存器起始地址
 #define REG_INPUT_START       0x0001

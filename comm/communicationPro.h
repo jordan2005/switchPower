@@ -8,7 +8,7 @@
 #ifndef COMMUNICATIONPRO_H_
 #define COMMUNICATIONPRO_H_
 #include "linuxType.h"
-
+#include "debugPrint.h"
 #define ID_NAME_BUF {\
 						"WRtzdsx", "WRgdfs", "WRspsx", "WRfdbg", "WRfdbd", "WRzkbz", "WRzkbk", "", "", "", \
 						"", "", "WRU2qy", "WRI1sx", "WRU2sx", "WRI2sx", "WRsfs", "WRxhfs", "WRjyzdkg", "WRjyfd", \

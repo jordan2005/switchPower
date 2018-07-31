@@ -9,6 +9,7 @@
 #define QUEUE_H_
 
 #include "para.h"
+#include "debugPrint.h"
 typedef unsigned char uchar;
 
 #ifndef TYPEDEF_BOOL

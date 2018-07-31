@@ -9,7 +9,7 @@
 #define CONTROLPRO_H_
 
 #include "linuxType.h"
-
+#include "debugPrint.h"
 int runCtrlPro(fid* pfdRecv,fid* pfdSend);
 
 #endif /* CONTROLPRO_H_ */

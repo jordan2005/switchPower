@@ -13,6 +13,9 @@
 #include <sys/time.h>
 #include<semaphore.h>
 
+#include <poll.h>
+#include <sys/epoll.h>
+
 
 #include "mb.h"
 #include "mbutils.h"
@@ -20,6 +23,8 @@
 #include "modbusTcpSrv.h"
 #include "para.h"
 #include "queue.h"
+
+#define SERVER_PORT 502
 
 static TProtocolBuf tProtocolBuf = { .bFrameSent = FALSE };
 TProtocolBuf* getProtocolBuf() { return &tProtocolBuf; }
@@ -236,13 +241,7 @@ eMBRegDiscreteCB( UCHAR * pucRegBuffer, USHORT usAddress, USHORT usNDiscrete )
   return eStatus;
 }
 
-/* socket
- * bind
- * listen
- * accept
- * send/recv
- */
-#define SERVER_PORT 502
+
 
 static int tcpSrvInit()
 {
@@ -277,32 +276,49 @@ static int tcpSrvInit()
     return nSocketFd;
 }
 
+
+
 static int MBTCPInit()
 {
 	eMBErrorCode eStatus = MB_ENOERR;
 	eStatus = eMBTCPInit(SERVER_PORT);
 	if (MB_ENOERR != eStatus)
 	{
-		printf("MBTCP initialization error code is %d.\r\n", eStatus);
+		DEBUG_PRINT("MBTCP initialization error code is %d.\r\n", eStatus);
 		return -1;
 	}
 	eStatus = eMBEnable();
 	if (MB_ENOERR != eStatus)
 	{
-		printf("MBEnbale error code is %d.\r\n", eStatus);
+		DEBUG_PRINT("MBEnbale error code is %d.\r\n", eStatus);
 		return -1;
 	}
 }
 
-static void handleMBMsg(int* pfd)
+#define MAX_CONNECT_CNT (20)
+static int curConnectCnt = 0;
+static void handleMbTcpMsg(int socketFd, int epollFd)
 {
-	/* 接收客户端发来的数据并显示出来 */
-	getProtocolBuf()->ucTCPRequestLen = recv(*pfd, getProtocolBuf()->ucTCPRequestFrame, MB_TCP_BUF_SIZE, 0);
+	getProtocolBuf()->ucTCPRequestLen = recv(socketFd, getProtocolBuf()->ucTCPRequestFrame, MB_TCP_BUF_SIZE, 0);
+
+
 	if (getProtocolBuf()->ucTCPRequestLen <= 0)
 	{
-		close(*pfd);//网络断开怎么处理 to do
-		printf("client %d disconnect.\n",*pfd);
-		*pfd = 0;
+		/*
+		 * TCP disconnect
+		 * 此处只能检测客户主动disconnect 不能检测出断线等异常断开
+		 * 可靠方法是检测若某连接单位时间未收到消息，由服务器主动断开该连接，待完成。
+		 */
+	    struct epoll_event event;
+	    event.data.fd = socketFd;
+	    event.events =  EPOLLIN|EPOLLET;
+	    epoll_ctl(epollFd, EPOLL_CTL_DEL, socketFd, &event);
+
+		close(socketFd);
+		DEBUG_PRINT("client %d disconnect.\n",socketFd);
+
+		if (curConnectCnt > 0)
+			--curConnectCnt;
 	}
 	else
 	{
@@ -313,7 +329,7 @@ static void handleMBMsg(int* pfd)
 		{
 			uint16_t iSendLen = 0;
 			getProtocolBuf()->bFrameSent = FALSE;
-			iSendLen = send(*pfd, getProtocolBuf()->ucTCPResponseFrame, getProtocolBuf()->ucTCPResponseLen, 0);
+			iSendLen = send(socketFd, getProtocolBuf()->ucTCPResponseFrame, getProtocolBuf()->ucTCPResponseLen, 0);
 		}
 	}
 }
@@ -340,109 +356,126 @@ static int checkParaChange(TQueue* ptQ)
 
 
 
+void acceptTcpConnect(int srvfd, int epollFd)
+{
+    struct sockaddr_in sin;
+    socklen_t len = sizeof(struct sockaddr_in);
+    bzero(&sin, len);
+
+    int confd = accept(srvfd, (struct sockaddr*)&sin, &len);
+
+    if (confd < 0)
+    {
+       DEBUG_PRINT("bad accept\n");
+       return;
+    }
+    else
+    {
+		if (curConnectCnt < MAX_CONNECT_CNT)
+		{
+			++curConnectCnt;
+			DEBUG_PRINT("accept connection: %d", confd);
+		}
+		else
+		{
+			close(confd);
+			DEBUG_PRINT("exceed max connect count to reject connection: %d", confd);
+		}
+    }
+    //add the new connect to epoll fd.
+    struct epoll_event event;
+    event.data.fd = confd;
+    event.events =  EPOLLIN|EPOLLET;
+    epoll_ctl(epollFd, EPOLL_CTL_ADD, confd, &event);
+}
+
+
+
 extern sem_t semtSetCmd;
 extern pthread_mutex_t mutexSetPara;
+void handleTcpMsg(int socketFd, int epollFd)
+{
+	pthread_mutex_lock(&mutexSetPara);
+	memcpy((char*)getSetParaBak(), (char*)(tModbusRegs.usRegHoldingBuf), sizeof(TPowerSetPara));//备份当前保持寄存器
+	handleMbTcpMsg(socketFd, epollFd);
+	if (checkParaChange(&tQueue) > 0)
+		sem_post(&semtSetCmd);
+	pthread_mutex_unlock(&mutexSetPara);
+}
+
+
+
+#define MAX_EPOLL_EVENTS (500)
 void* modbusServer(void* arg)
 {
-    int nSocketFd = 0;
-    socklen_t socketAddrLen;
-    struct timeval tv;
-    int maxfd = 0;
-    int retval = 0;
-    fd_set readfds;
-    int selectFd[100] = {0};
-    int selectCount = 0;
-    int index = 0;
-    char szIP[100][20] = {{0}};
-
-    nSocketFd = tcpSrvInit();
-    if(nSocketFd < 0)
-    {
-    	printf("MB socket initialization error\r\n");
-    	//goto out;
-    	return (void*)NULL;
-    }
+    int i = 0;
+    int sockListen;
+    int epollFd; //epoll描述符
+    struct epoll_event eventList[MAX_EPOLL_EVENTS];//事件数组
+    const int TIME_OUT_MS = 3000;
+    sockListen = tcpSrvInit();
 
     if (MBTCPInit()<0)
     {
-    	printf("MBTCP initialization error\r\n");
+    	DEBUG_PRINT("MBTCP initialization error\r\n");
     	return (void*)NULL;
     }
 
-    FD_ZERO(&readfds);
-    FD_SET(nSocketFd,&readfds);
-    tv.tv_sec = 10;
-    tv.tv_usec = 0;
-    maxfd = nSocketFd;
+    // epoll 初始化
+    epollFd = epoll_create(MAX_EPOLL_EVENTS);
+    struct epoll_event event;
+    event.events = EPOLLIN|EPOLLET;
+    event.data.fd = sockListen;
 
+    //add Event
+    if(epoll_ctl(epollFd, EPOLL_CTL_ADD, sockListen, &event) < 0)
+    {
+        DEBUG_PRINT("epoll add fail : fd = %d\n", sockListen);
+        return -1;
+    }
+
+    //epoll
     while(1)
     {
-        FD_ZERO(&readfds);
-        FD_SET(nSocketFd,&readfds);//readfds描述符集中第一个是套接字描述符nSocketFd
-        tv.tv_sec = 10;
-        tv.tv_usec = 0;
-        maxfd = nSocketFd;
+        //epoll_wait
+        int ret = epoll_wait(epollFd, eventList, MAX_EPOLL_EVENTS, TIME_OUT_MS);
 
-        /* 把所有的sock描述符都放入到这个描述符集中去 */
-        for (index = 0; index < selectCount; index++)
+        if (ret < 0)
         {
-			if (selectFd[index] != 0)
-				FD_SET(selectFd[index],&readfds);
-            if(selectFd[index] > maxfd)
-            {
-                maxfd = selectFd[index];
-            }
+            DEBUG_PRINT("epoll error\n");
+            break;
         }
-
-        retval = select(maxfd+1, &readfds, NULL, NULL, &tv);
-        if(retval < 0)   //出错
-            perror("select");
-		else if(retval == 0)// 当没有响应
+        else if (ret == 0)
         {
-			printf("timeout\n");
+            DEBUG_PRINT("timeout ...\n");
             continue;
         }
 
-        for (index = 0; index < selectCount; index++)//判断是哪个客户端的响应
+        //直接获取了活动事件数量,给出了活动的流,这里是和poll区别的关键
+        for(i=0; i<ret; ++i)
         {
-            if(FD_ISSET(selectFd[index], &readfds))
+            //错误退出
+            if ((eventList[i].events & EPOLLERR) ||
+            	(eventList[i].events & EPOLLHUP) ||
+                !(eventList[i].events & EPOLLIN))
             {
-            	pthread_mutex_lock(&mutexSetPara);
-            	memcpy((char*)getSetParaBak(), (char*)(tModbusRegs.usRegHoldingBuf), sizeof(TPowerSetPara));//备份当前保持寄存器
-            	handleMBMsg(&selectFd[index]);
-            	if (checkParaChange(&tQueue) > 0)
-            		sem_post(&semtSetCmd);
-            	pthread_mutex_unlock(&mutexSetPara);
+				DEBUG_PRINT("epoll error\n");
+				close (eventList[i].data.fd);
+				return -1;
             }
-        }
 
-		if (FD_ISSET(nSocketFd, &readfds)) //当有新的客户端连接进来
-		{
-		    struct sockaddr_in stClientAddr;
-		    int clifd = 0;
-			socketAddrLen = sizeof(struct sockaddr_in); //监听连接，如果有主机要连接过来，则建立套接口连接
-			/*
-			 * nSocketFd用来监听有没有新的链接，如果有客户建立连接，accept函数将创建一个新套接字来与该客户进行通信，并且返回新套接字的描述符，即clifd
-			 * select 监视nSocketFd 和 selectFd[],通过检查nSocketFd，可以检测有没有新的链接，通过检查 selectFd[]，可以知道是否有数据需要读入。
-			 */
-			clifd = accept(nSocketFd, (struct sockaddr*)&stClientAddr, &socketAddrLen);//nSocketFd用来监听有没有新的链接，如果
-			if(-1 == clifd)
-			{
-				perror("accept error: ");
-				return (void*)NULL;
-			}
-			else
-			{
-				selectFd[selectCount] = clifd;
-				/* 把每一个ip地址存放起来*/
-				strncpy(szIP[selectCount],inet_ntoa(stClientAddr.sin_addr),20);
-				selectCount++;
-				printf("commect %s %d successful\n",inet_ntoa(stClientAddr.sin_addr),ntohs(stClientAddr.sin_port));//ntohs(stClientAddr.sin_port)
-			}
-		}
+            if (eventList[i].data.fd == sockListen)
+            	acceptTcpConnect(sockListen, epollFd);
+            else
+            	handleTcpMsg(eventList[i].data.fd, epollFd);
+        }
     }
-    close(nSocketFd);
-    return (void*)NULL;
+
+    close(epollFd);
+    close(sockListen);
+
+    return 0;
 }
+
 
 

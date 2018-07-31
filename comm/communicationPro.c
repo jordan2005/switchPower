@@ -39,11 +39,11 @@ static void writeSetCmd(TQueue* ptQ, fid* fdSend)
 		TPowerSetPara* ptPara = (TPowerSetPara*)getRegHolding();
 		(void)Queue_bFetch(ptQ, &pt[i].usPos);
 		pt[i].u16Value = ((uint16*)ptPara)[pt[i].usPos];
-		printf("\n pos: %d, value: %d\n", pt[i].usPos, pt[i].u16Value);
+		DEBUG_PRINT("\n pos: %d, value: %d\n", pt[i].usPos, pt[i].u16Value);
 	}
 
 	if (write(*((fid*)fdSend+1), pt, usCnt*sizeof(TChangeParaMsg)) < 0)
-		printf("write pipe error.\n");
+		DEBUG_PRINT("write pipe error.\n");
 
 	free(pt);
 }
@@ -88,7 +88,7 @@ static void* readRunPara(void* fdRecv)
 			memcpy((char*)getRegHolding(), para, n);
 		}
 		else
-			printf("comm module receive data  error.\n");
+			DEBUG_PRINT("comm module receive data  error.\n");
 	}
 
 	return NULL;
@@ -126,7 +126,7 @@ void parseWebSetReq(char *pIdName,char *pIdValue)
 
 		sem_post(&semtSetCmd);
 	}
-	printf("RegHolding[%d] = %d\n", addr, atoi(pIdValue));
+	DEBUG_PRINT("RegHolding[%d] = %d\n", addr, atoi(pIdValue));
 }
 
 
@@ -164,11 +164,11 @@ static void handleUdpMsg(int fd)
         count = recvfrom(fd, buf, BUFF_LEN, 0, (struct sockaddr*)&clientAddr, &len);  //recvfrom是拥塞函数，没有数据就一直拥塞
         if(count == -1)
         {
-            printf("recieve data fail!\n");
+            DEBUG_PRINT("recieve data fail!\n");
         }
         else if (strncmp(buf, strReq, strlen(strReq)) != 0) //request not be identified
         {
-        	printf("request not be identified.\n");
+        	DEBUG_PRINT("request not be identified.\n");
         }
         else if (strlen(strReq) == strlen(buf)) //request refresh run data, only "reqPara:"
         {
@@ -206,7 +206,7 @@ static void* webServer(void* arg)
 	srvFd = socket(AF_INET, SOCK_DGRAM, 0); //AF_UNIX:IPV4;SOCK_DGRAM:UDP
 	if(srvFd < 0)
 	{
-		printf("create socket fail!\n");
+		DEBUG_PRINT("create socket fail!\n");
 		return -1;
 	}
 
@@ -218,7 +218,7 @@ static void* webServer(void* arg)
 	ret = bind(srvFd, (struct sockaddr*)&srvAddr, sizeof(srvAddr));
 	if(ret < 0)
 	{
-		printf("socket bind fail!\n");
+		DEBUG_PRINT("socket bind fail!\n");
 		return -1;
 	}
 
