@@ -29,7 +29,7 @@ CFLAGS += -I $(shell pwd)/port
 
 
 #LDFLAGS := -lm -lts -lpthread
-LDFLAGS := -lm -lpthread
+LDFLAGS := -lm -lpthread -lsqlite3
 
 export CFLAGS LDFLAGS
 

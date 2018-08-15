@@ -23,8 +23,7 @@
 #include "linuxType.h"
 #include "para.h"
 #include "controlPro.h"
-
-//#define SERVER_PORT 4321
+#include "database.h"
 
 
 static volatile TPowerRunPara tPowerRunPara =
@@ -100,7 +99,8 @@ void simRunPara()
 	int len = sizeof(tPowerRunPara.tGyRunBasePara)/2;
 	int i = 0;
 	srand((unsigned)time(NULL));
-	for( i = 0; i < len;i++ )
+	//for( i = 0; i < len;i++ )
+	for( i = 0; i < 10; i++ ) //generate 10 simulator running parameters.
 	{
 		pRunPara[i] = a[i] + rand() % 10;
 	}
@@ -145,6 +145,11 @@ void* readSetCmd(void* fdRecv)
 			{
 				DEBUG_PRINT("changePos:%d changeValue:%d .\n", ptRecv[i].usPos, ptRecv[i].u16Value);
 				ptSetPara[ptRecv[i].usPos] = ptRecv[i].u16Value;
+				if (1 == ptRecv[i].usPos) //work mode change, save a record.
+				{
+					tPowerRunPara.tGyRunBasePara.REgdfs = ptRecv[i].u16Value;
+					DB_saveWorkModeRecord(&tPowerRunPara);
+				}
 			}
 		}
 	}
